@@ -50,4 +50,20 @@ score := map[string]int{"Suraj": 100, "Opponent": 1}
 ## Things to cover with projects
 * context
 
+
+some important points 
+```go 
+//assigning pointer of a var to another var
+i := 5
+p := &i
+
+// here p gets the value of i's memory address
+```
+
+To create a slice dinamically sized array 
+```go 
+slice := make([]int, 7) // dtype, length, capacity (optional)
+//append to slice 
+append(slice, element_to_append)
+```
 > Then we will start building project
