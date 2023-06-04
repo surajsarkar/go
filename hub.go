@@ -1,34 +1,164 @@
 package main
 
+import (
+	"context"
+	"errors"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+
+	"golang.org/x/time/rate"
+
+	"nhooyr.io/websocket"
+)
+
 type Hub struct {
-	subscription_map map[string][]Client
-	channel_map      map[string]chan string
+	subscriberMessageBuffer int
+
+	publishLimiter *rate.Limiter
+
+	logf func(f string, v ...interface{})
+
+	serveMux http.ServeMux
+
+	subscribersMu sync.Mutex
+	subscribers   map[*subscriber]struct{}
 }
 
-func (h *Hub) Publish(topic string, message string, client Client) {
-	user_present := false
-	for _, c := range h.subscription_map[topic] {
-		if c.id == client.id {
-			user_present = true
+func (h *Hub) writePendingMessages(client Client, message string) {
+	filename := string(client.id) + ".txt"
+	os.WriteFile(filename, []byte(message))
+}
+
+func (h *Hub) sendPendingMessages(client Client) {
+	filename := string(client.id) + "txt"
+	content, err := os.ReadFile(filename)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	h.publish(content)
+}
+
+func newHubServer() *Hub {
+	cs := &Hub{
+		subscriberMessageBuffer: 16,
+		logf:                    log.Printf,
+		subscribers:             make(map[*subscriber]struct{}),
+		publishLimiter:          rate.NewLimiter(rate.Every(time.Millisecond*100), 8),
+	}
+	cs.serveMux.Handle("/", http.FileServer(http.Dir(".")))
+	cs.serveMux.HandleFunc("/subscribe", cs.subscribeHandler)
+	cs.serveMux.HandleFunc("/publish", cs.publishHandler)
+
+	return cs
+}
+
+type subscriber struct {
+	msgs      chan []byte
+	closeSlow func()
+}
+
+func (cs *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cs.serveMux.ServeHTTP(w, r)
+}
+
+func (cs *Hub) subscribeHandler(w http.ResponseWriter, r *http.Request) {
+	c, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		cs.logf("%v", err)
+		return
+	}
+	defer c.Close(websocket.StatusInternalError, "")
+
+	err = cs.subscribe(r.Context(), c)
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	if websocket.CloseStatus(err) == websocket.StatusNormalClosure ||
+		websocket.CloseStatus(err) == websocket.StatusGoingAway {
+		return
+	}
+	if err != nil {
+		cs.logf("%v", err)
+		return
+	}
+}
+
+func (cs *Hub) publishHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return
+	}
+	body := http.MaxBytesReader(w, r.Body, 8192)
+	msg, err := ioutil.ReadAll(body)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	cs.publish(msg)
+
+	w.WriteHeader(http.StatusAccepted)
+}
+func (cs *Hub) subscribe(ctx context.Context, c *websocket.Conn) error {
+	ctx = c.CloseRead(ctx)
+
+	s := &subscriber{
+		msgs: make(chan []byte, cs.subscriberMessageBuffer),
+		closeSlow: func() {
+			c.Close(websocket.StatusPolicyViolation, "connection too slow to keep up with messages")
+		},
+	}
+	cs.addSubscriber(s)
+	defer cs.deleteSubscriber(s)
+
+	for {
+		select {
+		case msg := <-s.msgs:
+			err := writeTimeout(ctx, time.Second*5, c, msg)
+			if err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
-	if !user_present {
-		h.channel_map["issue"] <- "not suscribed"
-	}
-
-	h.channel_map[topic] <- message
 }
 
-func (h *Hub) Suscribe(topic string, client Client) {
-	h.subscription_map[topic] = append(h.subscription_map[topic], client)
-}
+func (cs *Hub) publish(msg []byte) {
+	cs.subscribersMu.Lock()
+	defer cs.subscribersMu.Unlock()
 
-func (h *Hub) Unsuscribe(topic string, client Client) {
-	for i, c := range h.subscription_map[topic] {
-		if c.id == client.id {
-			d := h.subscription_map[topic]
-			h.subscription_map[topic] = append(h.subscription_map[topic][:i], d[i+1:]...)
+	cs.publishLimiter.Wait(context.Background())
 
+	for s := range cs.subscribers {
+		select {
+		case s.msgs <- msg:
+		default:
+			go s.closeSlow()
 		}
 	}
+}
+
+func (cs *Hub) addSubscriber(s *subscriber) {
+	cs.subscribersMu.Lock()
+	cs.subscribers[s] = struct{}{}
+	cs.subscribersMu.Unlock()
+}
+
+func (cs *Hub) deleteSubscriber(s *subscriber) {
+	cs.subscribersMu.Lock()
+	delete(cs.subscribers, s)
+	cs.subscribersMu.Unlock()
+}
+
+func writeTimeout(ctx context.Context, timeout time.Duration, c *websocket.Conn, msg []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return c.Write(ctx, websocket.MessageText, msg)
 }
