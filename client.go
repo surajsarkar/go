@@ -1,6 +1,6 @@
 package main
 
 type Client struct {
-	id   string
+	id   int
 	msgs chan []byte
 }
