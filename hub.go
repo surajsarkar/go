@@ -102,6 +102,7 @@ func (cs *Hub) subscribe(ctx context.Context, c *websocket.Conn) error {
 	ctx = c.CloseRead(ctx)
 
 	s := &Client{
+		id:   len(cs.subscribers) + 1,
 		msgs: make(chan []byte, cs.subscriberMessageBuffer),
 	}
 	cs.addSubscriber(s)
