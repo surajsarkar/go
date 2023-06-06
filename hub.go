@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -25,29 +24,29 @@ type Hub struct {
 	serveMux http.ServeMux
 
 	subscribersMu sync.Mutex
-	subscribers   map[*subscriber]struct{}
+	subscribers   map[*Client]struct{}
 }
 
-func (h *Hub) writePendingMessages(client Client, message string) {
-	filename := string(client.id) + ".txt"
-	os.WriteFile(filename, []byte(message))
-}
+// func (h *Hub) writePendingMessages(client Client, message string) {
+// 	filename := string(client.id) + ".txt"
+// 	os.WriteFile(filename, []byte(message), 0644)
+// }
 
-func (h *Hub) sendPendingMessages(client Client) {
-	filename := string(client.id) + "txt"
-	content, err := os.ReadFile(filename)
+// func (h *Hub) sendPendingMessages(client Client) {
+// 	filename := string(client.id) + "txt"
+// 	content, err := os.ReadFile(filename)
 
-	if err != nil {
-		log.Fatal(err)
-	}
-	h.publish(content)
-}
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+// 	h.publish(content)
+// }
 
 func newHubServer() *Hub {
 	cs := &Hub{
 		subscriberMessageBuffer: 16,
 		logf:                    log.Printf,
-		subscribers:             make(map[*subscriber]struct{}),
+		subscribers:             make(map[*Client]struct{}),
 		publishLimiter:          rate.NewLimiter(rate.Every(time.Millisecond*100), 8),
 	}
 	cs.serveMux.Handle("/", http.FileServer(http.Dir(".")))
@@ -55,11 +54,6 @@ func newHubServer() *Hub {
 	cs.serveMux.HandleFunc("/publish", cs.publishHandler)
 
 	return cs
-}
-
-type subscriber struct {
-	msgs      chan []byte
-	closeSlow func()
 }
 
 func (cs *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -107,11 +101,8 @@ func (cs *Hub) publishHandler(w http.ResponseWriter, r *http.Request) {
 func (cs *Hub) subscribe(ctx context.Context, c *websocket.Conn) error {
 	ctx = c.CloseRead(ctx)
 
-	s := &subscriber{
+	s := &Client{
 		msgs: make(chan []byte, cs.subscriberMessageBuffer),
-		closeSlow: func() {
-			c.Close(websocket.StatusPolicyViolation, "connection too slow to keep up with messages")
-		},
 	}
 	cs.addSubscriber(s)
 	defer cs.deleteSubscriber(s)
@@ -136,21 +127,17 @@ func (cs *Hub) publish(msg []byte) {
 	cs.publishLimiter.Wait(context.Background())
 
 	for s := range cs.subscribers {
-		select {
-		case s.msgs <- msg:
-		default:
-			go s.closeSlow()
-		}
+		s.msgs <- msg
 	}
 }
 
-func (cs *Hub) addSubscriber(s *subscriber) {
+func (cs *Hub) addSubscriber(s *Client) {
 	cs.subscribersMu.Lock()
 	cs.subscribers[s] = struct{}{}
 	cs.subscribersMu.Unlock()
 }
 
-func (cs *Hub) deleteSubscriber(s *subscriber) {
+func (cs *Hub) deleteSubscriber(s *Client) {
 	cs.subscribersMu.Lock()
 	delete(cs.subscribers, s)
 	cs.subscribersMu.Unlock()
