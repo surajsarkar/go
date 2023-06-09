@@ -1,58 +1,41 @@
 package main
 
 import (
-	"context"
-	"errors"
+	"fmt"
 	"log"
-	"net"
 	"net/http"
-	"os"
-	"os/signal"
-	"time"
 )
 
 func main() {
-	log.SetFlags(0)
+	// log.SetFlags(0)
 
-	err := run()
-	if err != nil {
-		log.Fatal(err)
-	}
-}
+	var server_error_chan chan []byte
 
-func run() error {
-	if len(os.Args) < 2 {
-		return errors.New("please provide an address to listen on as the first argument")
-	}
+	h := newHub()
 
-	l, err := net.Listen("tcp", os.Args[1])
-	if err != nil {
-		return err
-	}
-	log.Printf("listening on http://%v", l.Addr())
-
-	cs := newHubServer()
-	s := &http.Server{
-		Handler:      cs,
-		ReadTimeout:  time.Second * 10,
-		WriteTimeout: time.Second * 10,
-	}
-	errc := make(chan error, 1)
 	go func() {
-		errc <- s.Serve(l)
+
+		publishServer := http.NewServeMux()
+		publishServer.HandleFunc("/publish", h.publish)
+		publishServerError := http.ListenAndServe(":9000", publishServer)
+		if publishServerError != nil {
+			server_error_chan <- []byte("error while starting publish server")
+		}
+	}()
+	go func() {
+
+		server := http.NewServeMux()
+		server.HandleFunc("/", h.actionHandler)
+
+		socket_server_err := http.ListenAndServe(":8000", server)
+		if socket_server_err != nil {
+
+			server_error_chan <- []byte("error while starting action server")
+		}
 	}()
 
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt)
-	select {
-	case err := <-errc:
-		log.Printf("failed to serve: %v", err)
-	case sig := <-sigs:
-		log.Printf("terminating: %v", sig)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancel()
-
-	return s.Shutdown(ctx)
+	fmt.Println("started")
+	msg := <-server_error_chan
+	fmt.Println("see If staying")
+	log.Println(msg)
 }
