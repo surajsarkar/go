@@ -7,6 +7,8 @@ import (
 
 func main() {
 
+	var server_spinning_err chan []byte
+
 	h := newHub()
 
 	go func() {
@@ -15,7 +17,7 @@ func main() {
 		publishServer.HandleFunc("/publish", h.publish)
 		publishServerError := http.ListenAndServe(":9000", publishServer)
 		if publishServerError != nil {
-			fmt.Println("Error while spinning publish server")
+			server_spinning_err <- []byte("Error while spinning publish server")
 		}
 	}()
 	go func() {
@@ -25,8 +27,14 @@ func main() {
 
 		socket_server_err := http.ListenAndServe(":8000", server)
 		if socket_server_err != nil {
-			fmt.Println("Error while spinning action server")
+			server_spinning_err <- []byte("Error while spinning action server")
 		}
 	}()
+
+	spinnng_err := <-server_spinning_err
+
+	if spinnng_err != nil {
+		fmt.Println(string(spinnng_err))
+	}
 
 }
