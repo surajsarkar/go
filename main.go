@@ -6,7 +6,6 @@ import (
 )
 
 func main() {
-	// log.SetFlags(0)
 
 	h := newHub()
 
