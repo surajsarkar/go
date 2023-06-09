@@ -2,151 +2,131 @@ package main
 
 import (
 	"context"
-	"errors"
-	"io/ioutil"
-	"log"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
-
-	"golang.org/x/time/rate"
 
 	"nhooyr.io/websocket"
 )
 
 type Hub struct {
-	subscriberMessageBuffer int
-
-	publishLimiter *rate.Limiter
-
-	logf func(f string, v ...interface{})
-
-	serveMux http.ServeMux
-
-	subscribersMu sync.Mutex
-	subscribers   map[*Client]struct{}
+	subsMap map[string][]*Client
+	chanMap map[string]chan []byte
+	lock    sync.Mutex
 }
 
-// func (h *Hub) writePendingMessages(client Client, message string) {
-// 	filename := string(client.id) + ".txt"
-// 	os.WriteFile(filename, []byte(message), 0644)
-// }
+func (h *Hub) actionHandler(w http.ResponseWriter, r *http.Request) {
 
-// func (h *Hub) sendPendingMessages(client Client) {
-// 	filename := string(client.id) + "txt"
-// 	content, err := os.ReadFile(filename)
+	var susMsg suscriptionMsg
 
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	h.publish(content)
-// }
+	parsed_body := json.NewDecoder(r.Body)
+	decode_err := parsed_body.Decode(&susMsg)
 
-func newHubServer() *Hub {
-	cs := &Hub{
-		subscriberMessageBuffer: 16,
-		logf:                    log.Printf,
-		subscribers:             make(map[*Client]struct{}),
-		publishLimiter:          rate.NewLimiter(rate.Every(time.Millisecond*100), 8),
+	if decode_err != nil {
+		w.Write([]byte("error while decoding body"))
 	}
-	cs.serveMux.Handle("/", http.FileServer(http.Dir(".")))
-	cs.serveMux.HandleFunc("/subscribe", cs.subscribeHandler)
-	cs.serveMux.HandleFunc("/publish", cs.publishHandler)
 
-	return cs
+	if susMsg.Action == "suscribe" {
+		h.suscribe(w, r, susMsg.Cliend_id, susMsg.Topic)
+	} else if susMsg.Action == "unsuscribe" {
+		h.unsuscribe(susMsg.Cliend_id)
+	}
+
 }
 
-func (cs *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cs.serveMux.ServeHTTP(w, r)
-}
+func (h *Hub) suscribe(w http.ResponseWriter, r *http.Request, client_id string, topic string) {
 
-func (cs *Hub) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	c, err := websocket.Accept(w, r, nil)
-	if err != nil {
-		cs.logf("%v", err)
-		return
-	}
-	defer c.Close(websocket.StatusInternalError, "")
 
-	err = cs.subscribe(r.Context(), c)
-	if errors.Is(err, context.Canceled) {
-		return
-	}
-	if websocket.CloseStatus(err) == websocket.StatusNormalClosure ||
-		websocket.CloseStatus(err) == websocket.StatusGoingAway {
-		return
-	}
 	if err != nil {
-		cs.logf("%v", err)
+		w.Write([]byte("error while upgrading connection"))
+	}
+	newClient := Client{id: client_id}
+	_, ok := h.subsMap[topic]
+
+	if ok {
+		h.subsMap[topic] = append(h.subsMap[topic], &newClient)
+	} else {
+
+		h.subsMap[topic] = []*Client{&newClient}
+	}
+	listining_err := h.listenIncomingMessage()
+	if listining_err != nil {
 		return
 	}
+	defer c.Close(websocket.StatusInternalError, "connection closed")
 }
 
-func (cs *Hub) publishHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-		return
-	}
-	body := http.MaxBytesReader(w, r.Body, 8192)
-	msg, err := ioutil.ReadAll(body)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
-		return
-	}
-
-	cs.publish(msg)
-
-	w.WriteHeader(http.StatusAccepted)
-}
-func (cs *Hub) subscribe(ctx context.Context, c *websocket.Conn) error {
-	ctx = c.CloseRead(ctx)
-
-	s := &Client{
-		id:   len(cs.subscribers) + 1,
-		msgs: make(chan []byte, cs.subscriberMessageBuffer),
-	}
-	cs.addSubscriber(s)
-	defer cs.deleteSubscriber(s)
-
-	for {
-		select {
-		case msg := <-s.msgs:
-			err := writeTimeout(ctx, time.Second*5, c, msg)
-			if err != nil {
-				return err
+func (h *Hub) unsuscribe(client_id string) {
+	h.lock.Lock()
+	fmt.Println(h.subsMap)
+	defer h.lock.Unlock()
+	for key, val := range h.subsMap {
+		for client_index, client := range val {
+			if client.id == client_id {
+				h.subsMap[key] = append(h.subsMap[key][:client_index], h.subsMap[key][client_index+1:]...)
 			}
-		case <-ctx.Done():
-			return ctx.Err()
+
 		}
 	}
 }
 
-func (cs *Hub) publish(msg []byte) {
-	cs.subscribersMu.Lock()
-	defer cs.subscribersMu.Unlock()
+func (h *Hub) publish(w http.ResponseWriter, r *http.Request) {
+	var publish_msg publishMsg
+	publish_msg_decoder := json.NewDecoder(r.Body)
 
-	cs.publishLimiter.Wait(context.Background())
+	err := publish_msg_decoder.Decode(&publish_msg)
 
-	for s := range cs.subscribers {
-		s.msgs <- msg
+	if err != nil {
+		w.Write([]byte("error while reading body json"))
 	}
+
+	_, ok := h.subsMap[publish_msg.Topic]
+	if ok {
+		h.chanMap[publish_msg.Topic] <- []byte(publish_msg.Message)
+	}
+
 }
 
-func (cs *Hub) addSubscriber(s *Client) {
-	cs.subscribersMu.Lock()
-	cs.subscribers[s] = struct{}{}
-	cs.subscribersMu.Unlock()
-}
-
-func (cs *Hub) deleteSubscriber(s *Client) {
-	cs.subscribersMu.Lock()
-	delete(cs.subscribers, s)
-	cs.subscribersMu.Unlock()
-}
-
-func writeTimeout(ctx context.Context, timeout time.Duration, c *websocket.Conn, msg []byte) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+func (h *Hub) writeMessage(ctx context.Context, c *websocket.Conn, msg []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
 	return c.Write(ctx, websocket.MessageText, msg)
+
+}
+
+func (h *Hub) listenIncomingMessage() error {
+
+	for {
+		select {
+		case info_msg := <-h.chanMap["info"]:
+			info_clients := h.subsMap["info"]
+			for _, client := range info_clients {
+				info_err := h.writeMessage(client.ctx, client.conn, info_msg)
+				if info_err != nil {
+					return info_err
+				}
+			}
+		case broadcast_msg := <-h.chanMap["broadcast"]:
+			for _, client := range h.subsMap["broadcast"] {
+				brod_err := h.writeMessage(client.ctx, client.conn, broadcast_msg)
+				if brod_err != nil {
+					return brod_err
+				}
+			}
+
+		}
+	}
+}
+
+func newHub() *Hub {
+	h := &Hub{
+		subsMap: map[string][]*Client{"info": make([]*Client, 0)},
+		chanMap: map[string]chan []byte{"info": make(chan []byte), "broadcast": make(chan []byte)},
+	}
+
+	return h
 }
