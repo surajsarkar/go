@@ -2,14 +2,11 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 )
 
 func main() {
 	// log.SetFlags(0)
-
-	var server_error_chan chan []byte
 
 	h := newHub()
 
@@ -19,7 +16,7 @@ func main() {
 		publishServer.HandleFunc("/publish", h.publish)
 		publishServerError := http.ListenAndServe(":9000", publishServer)
 		if publishServerError != nil {
-			server_error_chan <- []byte("error while starting publish server")
+			fmt.Println("Error while spinning publish server")
 		}
 	}()
 	go func() {
@@ -29,13 +26,8 @@ func main() {
 
 		socket_server_err := http.ListenAndServe(":8000", server)
 		if socket_server_err != nil {
-
-			server_error_chan <- []byte("error while starting action server")
+			fmt.Println("Error while spinning action server")
 		}
 	}()
 
-	fmt.Println("started")
-	msg := <-server_error_chan
-	fmt.Println("see If staying")
-	log.Println(msg)
 }
