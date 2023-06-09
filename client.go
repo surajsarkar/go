@@ -1,6 +1,13 @@
 package main
 
+import (
+	"context"
+
+	"nhooyr.io/websocket"
+)
+
 type Client struct {
-	id   int
-	msgs chan []byte
+	id   string
+	conn *websocket.Conn
+	ctx  context.Context
 }
