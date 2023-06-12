@@ -16,6 +16,7 @@ type Hub struct {
 	subsMap map[string][]*Client
 	chanMap map[string]chan []byte
 	lock    sync.Mutex
+	clients []Client
 }
 
 func (h *Hub) suscribe(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +94,6 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 		}
 
 		var wsMessage socketMsg
-		// wsmsg_err := wsjson.Read(ctx, c, wsMessage)
 
 		wsDecoder := json.NewDecoder(msg)
 		decode_err := wsDecoder.Decode(&wsMessage)
@@ -103,10 +103,19 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 		}
 
 		switch wsMessage.Action {
+		case "register":
+			newClient := Client{id: wsMessage.Cliend_id, conn: c, ctx: ctx}
+			h.clients = append(h.clients, newClient)
+			log.Println("registered " + newClient.id)
 		case "subscribe":
 			newClient := Client{id: wsMessage.Cliend_id, conn: c, ctx: ctx}
-			h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic], &newClient)
-			newClient.conn.Write(newClient.ctx, websocket.MessageText, []byte("added you to "+wsMessage.Topic))
+			for _, client := range h.clients {
+				if client.id == wsMessage.Cliend_id {
+					h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic], &client)
+					newClient.conn.Write(newClient.ctx, websocket.MessageText, []byte("added you to "+wsMessage.Topic))
+				}
+
+			}
 			fmt.Println(h.subsMap[wsMessage.Topic])
 		case "unsubscribe":
 			for index, client := range h.subsMap[wsMessage.Topic] {
@@ -116,6 +125,14 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 
 			}
 			fmt.Println(h.subsMap[wsMessage.Topic])
+		case "disconnect":
+			for _, client := range h.clients {
+				if client.id == wsMessage.Cliend_id {
+					client.conn.Close(websocket.StatusGoingAway, "fullfilled my dreams")
+					client.ctx.Done()
+				}
+			}
+			log.Println("unregistered " + wsMessage.Cliend_id)
 		case "publish":
 
 			for _, client := range h.subsMap[wsMessage.Topic] {
@@ -135,6 +152,7 @@ func newHub() *Hub {
 	h := &Hub{
 		subsMap: map[string][]*Client{"info": make([]*Client, 0)},
 		chanMap: map[string]chan []byte{"info": make(chan []byte), "broadcast": make(chan []byte)},
+		clients: make([]Client, 0),
 	}
 
 	return h
