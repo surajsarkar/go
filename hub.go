@@ -49,6 +49,10 @@ func (h *Hub) unsuscribe(client_id string, topic string) {
 }
 
 func (h *Hub) publish(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
 	var publish_msg publishMsg
 	publish_msg_decoder := json.NewDecoder(r.Body)
 
