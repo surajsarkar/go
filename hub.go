@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"nhooyr.io/websocket"
 )
@@ -65,22 +64,13 @@ func (h *Hub) publish(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("no client present"))
 	}
 
-	for _, client := range clients {
-		if ok {
+	if ok {
+		for _, client := range clients {
 			client.conn.Write(client.ctx, websocket.MessageText, []byte(publish_msg.Message))
-			// h.chanMap[publish_msg.Topic] <- []byte(publish_msg.Message)
 			fmt.Println("published your message")
+			w.Write([]byte("published your message to channel " + publish_msg.Topic + " with client id " + publish_msg.Cliend_id))
 		}
 	}
-	w.Write([]byte("published your message to channel " + publish_msg.Topic + " with client id " + publish_msg.Cliend_id))
-
-}
-
-func (h *Hub) writeMessage(ctx context.Context, c *websocket.Conn, msg []byte) error {
-	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-	defer cancel()
-
-	return c.Write(ctx, websocket.MessageText, msg)
 
 }
 
