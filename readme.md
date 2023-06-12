@@ -1,4 +1,62 @@
 # Project
+## Routes
+1. `localhost:8000/publish` only supports `POST` method
+```json
+{
+    "message": "hello buddies",
+    "client_id": "surajsarkar",
+    "topic": "info"
+}
+```
+2. `localhost:8000/ws` some of examples you can use to test is ⬇️
+## some of the template actions in `websocket`
+
+* For **registring** client
+```json
+{
+    "message": "",
+    "topic": "",
+    "client_id": "surajsarkar",
+    "action": "register"
+}
+```
+* For **disconnecting** client 
+```json
+{
+    "message": "",
+    "topic": "",
+    "client_id": "surajsarkar",
+    "action": "disconnect"
+}
+```
+* **subscribing** to topic *eg: info*
+```json
+{
+    "message": "",
+    "topic": "info",
+    "client_id": "surajsarkar",
+    "action": "subscribe"
+}
+```
+* **unsubscribing** from a topic *eg: info*
+```json
+{
+    "message": "",
+    "topic": "info",
+    "client_id": "surajsarkar",
+    "action": "unsubscribe"
+}
+```
+
+* **publishing** to a channel
+```json
+{
+    "message": "Hi how are you.",
+    "topic": "info",
+    "client_id": "surajsarkar",
+    "action": "publish"
+}
+```
 
 * Define a interface
 ```go
