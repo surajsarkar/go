@@ -1,40 +1,19 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"net/http"
 )
 
 func main() {
 
-	var server_spinning_err chan []byte
+	log.SetFlags(log.Default().Flags() | log.Llongfile)
 
 	h := newHub()
 
-	go func() {
+	server := http.NewServeMux()
+	server.HandleFunc("/publish", h.publish)
+	server.HandleFunc("/ws", h.suscribe)
 
-		publishServer := http.NewServeMux()
-		publishServer.HandleFunc("/publish", h.publish)
-		publishServerError := http.ListenAndServe(":9000", publishServer)
-		if publishServerError != nil {
-			server_spinning_err <- []byte("Error while spinning publish server")
-		}
-	}()
-	go func() {
-
-		server := http.NewServeMux()
-		server.HandleFunc("/", h.actionHandler)
-
-		socket_server_err := http.ListenAndServe(":8000", server)
-		if socket_server_err != nil {
-			server_spinning_err <- []byte("Error while spinning action server")
-		}
-	}()
-
-	spinnng_err := <-server_spinning_err
-
-	if spinnng_err != nil {
-		fmt.Println(string(spinnng_err))
-	}
-
+	http.ListenAndServe(":8000", server)
 }
