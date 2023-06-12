@@ -1,9 +1,10 @@
 package main
 
-type suscriptionMsg struct {
+type socketMsg struct {
 	Action    string `json:"action"`
 	Topic     string `json:"topic"`
 	Cliend_id string `json:"client_id"`
+	Message   string `json:"message"`
 }
 
 type publishMsg struct {
