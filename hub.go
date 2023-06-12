@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -17,59 +18,33 @@ type Hub struct {
 	lock    sync.Mutex
 }
 
-func (h *Hub) actionHandler(w http.ResponseWriter, r *http.Request) {
-
-	var susMsg suscriptionMsg
-
-	parsed_body := json.NewDecoder(r.Body)
-	decode_err := parsed_body.Decode(&susMsg)
-
-	if decode_err != nil {
-		w.Write([]byte("error while decoding body"))
-	}
-
-	if susMsg.Action == "suscribe" {
-		h.suscribe(w, r, susMsg.Cliend_id, susMsg.Topic)
-	} else if susMsg.Action == "unsuscribe" {
-		h.unsuscribe(susMsg.Cliend_id)
-	}
-
-}
-
-func (h *Hub) suscribe(w http.ResponseWriter, r *http.Request, client_id string, topic string) {
+func (h *Hub) suscribe(w http.ResponseWriter, r *http.Request) {
 
 	c, err := websocket.Accept(w, r, nil)
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
 
 	if err != nil {
 		w.Write([]byte("error while upgrading connection"))
 	}
-	newClient := Client{id: client_id}
-	_, ok := h.subsMap[topic]
-
-	if ok {
-		h.subsMap[topic] = append(h.subsMap[topic], &newClient)
-	} else {
-
-		h.subsMap[topic] = []*Client{&newClient}
-	}
-	listining_err := h.listenIncomingMessage()
+	c.Write(ctx, websocket.MessageText, []byte("got your message"))
+	listining_err := h.listenIncomingMessage(ctx, c)
 	if listining_err != nil {
-		return
+		fmt.Println("error while listing")
+		fmt.Println(listining_err)
 	}
 	defer c.Close(websocket.StatusInternalError, "connection closed")
 }
 
-func (h *Hub) unsuscribe(client_id string) {
+func (h *Hub) unsuscribe(client_id string, topic string) {
 	h.lock.Lock()
 	fmt.Println(h.subsMap)
 	defer h.lock.Unlock()
-	for key, val := range h.subsMap {
-		for client_index, client := range val {
-			if client.id == client_id {
-				h.subsMap[key] = append(h.subsMap[key][:client_index], h.subsMap[key][client_index+1:]...)
-			}
-
+	for index, client := range h.subsMap[topic] {
+		if client.id == client_id {
+			h.subsMap[topic] = append(h.subsMap[topic][:index], h.subsMap[topic][index+1:]...)
 		}
+
 	}
 }
 
@@ -83,10 +58,20 @@ func (h *Hub) publish(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("error while reading body json"))
 	}
 
-	_, ok := h.subsMap[publish_msg.Topic]
-	if ok {
-		h.chanMap[publish_msg.Topic] <- []byte(publish_msg.Message)
+	clients, ok := h.subsMap[publish_msg.Topic]
+
+	if len(clients) == 0 {
+		w.Write([]byte("no client present"))
 	}
+
+	for _, client := range clients {
+		if ok {
+			client.conn.Write(client.ctx, websocket.MessageText, []byte(publish_msg.Message))
+			// h.chanMap[publish_msg.Topic] <- []byte(publish_msg.Message)
+			fmt.Println("published your message")
+		}
+	}
+	w.Write([]byte("published your message to channel " + publish_msg.Topic + " with client id " + publish_msg.Cliend_id))
 
 }
 
@@ -98,28 +83,52 @@ func (h *Hub) writeMessage(ctx context.Context, c *websocket.Conn, msg []byte) e
 
 }
 
-func (h *Hub) listenIncomingMessage() error {
+func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) error {
 
 	for {
-		select {
-		case info_msg := <-h.chanMap["info"]:
-			info_clients := h.subsMap["info"]
-			for _, client := range info_clients {
-				info_err := h.writeMessage(client.ctx, client.conn, info_msg)
-				if info_err != nil {
-					return info_err
+		_, msg, err := c.Reader(ctx)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		var wsMessage socketMsg
+		// wsmsg_err := wsjson.Read(ctx, c, wsMessage)
+
+		wsDecoder := json.NewDecoder(msg)
+		decode_err := wsDecoder.Decode(&wsMessage)
+		log.Println(wsMessage)
+		if decode_err != nil {
+			fmt.Println(decode_err)
+		}
+
+		switch wsMessage.Action {
+		case "subscribe":
+			newClient := Client{id: wsMessage.Cliend_id, conn: c, ctx: ctx}
+			h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic], &newClient)
+			newClient.conn.Write(newClient.ctx, websocket.MessageText, []byte("added you to "+wsMessage.Topic))
+			fmt.Println(h.subsMap[wsMessage.Topic])
+		case "unsubscribe":
+			for index, client := range h.subsMap[wsMessage.Topic] {
+				if client.id == wsMessage.Cliend_id {
+					h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic][:index], h.subsMap[wsMessage.Topic][index+1:]...)
 				}
+
 			}
-		case broadcast_msg := <-h.chanMap["broadcast"]:
-			for _, client := range h.subsMap["broadcast"] {
-				brod_err := h.writeMessage(client.ctx, client.conn, broadcast_msg)
-				if brod_err != nil {
-					return brod_err
-				}
+			fmt.Println(h.subsMap[wsMessage.Topic])
+		case "publish":
+
+			for _, client := range h.subsMap[wsMessage.Topic] {
+				client.conn.Write(ctx, websocket.MessageText, []byte(wsMessage.Message))
+
 			}
+		default:
+			continue
 
 		}
+
 	}
+
 }
 
 func newHub() *Hub {
