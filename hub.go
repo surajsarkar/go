@@ -19,26 +19,28 @@ type Hub struct {
 
 func (h *Hub) actionHandler(w http.ResponseWriter, r *http.Request) {
 
-	var susMsg suscriptionMsg
+	// var susMsg suscriptionMsg
 
-	parsed_body := json.NewDecoder(r.Body)
-	decode_err := parsed_body.Decode(&susMsg)
+	// parsed_body := json.NewDecoder(r.Body)
+	// decode_err := parsed_body.Decode(&susMsg)
 
-	if decode_err != nil {
-		w.Write([]byte("error while decoding body"))
-	}
+	// if decode_err != nil {
+	// 	w.Write([]byte("error while decoding body"))
+	// }
 
-	if susMsg.Action == "suscribe" {
-		h.suscribe(w, r, susMsg.Cliend_id, susMsg.Topic)
-	} else if susMsg.Action == "unsuscribe" {
-		h.unsuscribe(susMsg.Cliend_id)
-	}
+	// h.suscribe(w, r, "surajsarkar", "info")
+	// if susMsg.Action == "suscribe" {
+	// h.suscribe(w, r, susMsg.Cliend_id, susMsg.Topic)
+	// } else if susMsg.Action == "unsuscribe" {
+	// 	h.unsuscribe(susMsg.Cliend_id)
+	// }
 
 }
 
 func (h *Hub) suscribe(w http.ResponseWriter, r *http.Request, client_id string, topic string) {
 
 	c, err := websocket.Accept(w, r, nil)
+	ctx, _ := context.WithTimeout(r.Context(), time.Second*10)
 
 	if err != nil {
 		w.Write([]byte("error while upgrading connection"))
@@ -52,10 +54,11 @@ func (h *Hub) suscribe(w http.ResponseWriter, r *http.Request, client_id string,
 
 		h.subsMap[topic] = []*Client{&newClient}
 	}
-	listining_err := h.listenIncomingMessage()
-	if listining_err != nil {
-		return
-	}
+	c.Write(ctx, websocket.MessageText, []byte("got your message"))
+	// listining_err := h.listenIncomingMessage()
+	// if listining_err != nil {
+	// 	return
+	// }
 	defer c.Close(websocket.StatusInternalError, "connection closed")
 }
 
