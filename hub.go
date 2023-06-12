@@ -86,10 +86,10 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 		var wsMessage socketMsg
 
 		wsDecoder := json.NewDecoder(msg)
-		decode_err := wsDecoder.Decode(&wsMessage)
+		err = wsDecoder.Decode(&wsMessage)
 		log.Println(wsMessage)
-		if decode_err != nil {
-			fmt.Println(decode_err)
+		if err != nil {
+			fmt.Println(err)
 		}
 
 		switch wsMessage.Action {
