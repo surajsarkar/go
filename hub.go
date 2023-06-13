@@ -102,11 +102,10 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 			h.clients = append(h.clients, newClient)
 			log.Println("registered " + newClient.id)
 		case "subscribe":
-			newClient := Client{id: wsMessage.Cliend_id, conn: c, ctx: ctx}
 			for _, client := range h.clients {
 				if client.id == wsMessage.Cliend_id {
 					h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic], &client)
-					newClient.conn.Write(newClient.ctx, websocket.MessageText, []byte("added you to "+wsMessage.Topic))
+					client.conn.Write(client.ctx, websocket.MessageText, []byte("added you to "+wsMessage.Topic))
 				}
 
 			}
