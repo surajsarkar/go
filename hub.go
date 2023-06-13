@@ -36,18 +36,6 @@ func (h *Hub) suscribe(w http.ResponseWriter, r *http.Request) {
 	defer c.Close(websocket.StatusInternalError, "connection closed")
 }
 
-func (h *Hub) unsuscribe(client_id string, topic string) {
-	h.lock.Lock()
-	fmt.Println(h.subsMap)
-	defer h.lock.Unlock()
-	for index, client := range h.subsMap[topic] {
-		if client.id == client_id {
-			h.subsMap[topic] = append(h.subsMap[topic][:index], h.subsMap[topic][index+1:]...)
-		}
-
-	}
-}
-
 func (h *Hub) publish(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -126,6 +114,7 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 				}
 			}
 			log.Println("unregistered " + wsMessage.Cliend_id)
+			// return nil
 		case "publish":
 
 			for _, client := range h.subsMap[wsMessage.Topic] {
