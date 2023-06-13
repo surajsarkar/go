@@ -1,6 +1,6 @@
 # Project
 ## Routes
-1. `localhost:8000/publish` only supports `POST` method
+1. `/publish` only supports `POST` method
 ```json
 {
     "message": "hello buddies",
@@ -8,7 +8,7 @@
     "topic": "info"
 }
 ```
-2. `localhost:8000/ws` some of examples you can use to test is ⬇️
+2. `/ws` some of examples you can use to test is ⬇️
 ## some of the template actions in `websocket`
 
 * For **registring** client
@@ -29,7 +29,7 @@
     "action": "disconnect"
 }
 ```
-* **subscribing** to topic *eg: info*
+* **subscribing** to a topic *eg: info*
 ```json
 {
     "message": "",
