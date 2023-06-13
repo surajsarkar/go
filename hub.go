@@ -18,7 +18,7 @@ type Hub struct {
 	clients []Client
 }
 
-func (h *Hub) suscribe(w http.ResponseWriter, r *http.Request) {
+func (h *Hub) wsHandler(w http.ResponseWriter, r *http.Request) {
 
 	c, err := websocket.Accept(w, r, nil)
 	ctx, cancel := context.WithCancel(r.Context())

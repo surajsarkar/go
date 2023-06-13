@@ -13,7 +13,7 @@ func main() {
 
 	server := http.NewServeMux()
 	server.HandleFunc("/publish", h.publish)
-	server.HandleFunc("/ws", h.suscribe)
+	server.HandleFunc("/ws", h.wsHandler)
 
 	http.ListenAndServe(":8000", server)
 }
