@@ -107,14 +107,16 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 			}
 			fmt.Println(h.subsMap[wsMessage.Topic])
 		case "disconnect":
-			for _, client := range h.clients {
-				if client.id == wsMessage.Cliend_id {
-					client.conn.Close(websocket.StatusGoingAway, "fullfilled my dreams")
-					client.ctx.Done()
+			defer func() {
+				for _, client := range h.clients {
+					if client.id == wsMessage.Cliend_id {
+						client.conn.Close(websocket.StatusGoingAway, "fullfilled my dreams")
+						client.ctx.Done()
+					}
 				}
-			}
+			}()
 			log.Println("unregistered " + wsMessage.Cliend_id)
-			// return nil
+			return nil
 		case "publish":
 
 			for _, client := range h.subsMap[wsMessage.Topic] {
