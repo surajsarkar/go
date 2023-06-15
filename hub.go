@@ -16,6 +16,7 @@ type Hub struct {
 	chanMap map[string]chan []byte
 	lock    sync.Mutex
 	clients []Client
+	messageChan chan socketMsg
 }
 
 func (h *Hub) wsHandler(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +36,17 @@ func (h *Hub) wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.Close(websocket.StatusInternalError, "connection closed")
 }
+
+// func (h *Hub) spinChannel() {
+// 	for {
+// 		msg, ok := <- h.messageChan
+// 		if ok {
+// 			for _, client := range h.subsMap[msg.Topic]{
+// 				client.conn.Write(client.ctx, websocket.MessageText, []byte(msg.Message))
+// 			}
+// 		}
+// 	}
+// }
 
 func (h *Hub) publish(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -86,10 +98,13 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 
 		switch wsMessage.Action {
 		case "register":
+			h.lock.Lock()
 			newClient := Client{id: wsMessage.Cliend_id, conn: c, ctx: ctx}
 			h.clients = append(h.clients, newClient)
 			log.Println("registered " + newClient.id)
+			h.lock.Unlock()
 		case "subscribe":
+			h.lock.Lock()
 			for _, client := range h.clients {
 				if client.id == wsMessage.Cliend_id {
 					h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic], &client)
@@ -97,17 +112,21 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 				}
 
 			}
+			h.lock.Lock()
 			fmt.Println(h.subsMap[wsMessage.Topic])
 		case "unsubscribe":
+			h.lock.Lock()
 			for index, client := range h.subsMap[wsMessage.Topic] {
 				if client.id == wsMessage.Cliend_id {
 					h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic][:index], h.subsMap[wsMessage.Topic][index+1:]...)
 				}
 
 			}
+			h.lock.Lock()
 			fmt.Println(h.subsMap[wsMessage.Topic])
 		case "disconnect":
 			defer func() {
+				
 				for _, client := range h.clients {
 					if client.id == wsMessage.Cliend_id {
 						client.conn.Close(websocket.StatusGoingAway, "fullfilled my dreams")
@@ -123,6 +142,7 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 				client.conn.Write(ctx, websocket.MessageText, []byte(wsMessage.Message))
 
 			}
+			// h.messageChan <- wsMessage
 		default:
 			continue
 

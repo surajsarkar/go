@@ -11,6 +11,10 @@ func main() {
 
 	h := newHub()
 
+	// go func () {
+	// 	h.spinChannel()
+	// }()
+
 	server := http.NewServeMux()
 	server.HandleFunc("/publish", h.publish)
 	server.HandleFunc("/ws", h.wsHandler)
