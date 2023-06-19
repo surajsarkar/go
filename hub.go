@@ -37,16 +37,28 @@ func (h *Hub) wsHandler(w http.ResponseWriter, r *http.Request) {
 	defer c.Close(websocket.StatusInternalError, "connection closed")
 }
 
-// func (h *Hub) spinChannel() {
-// 	for {
-// 		msg, ok := <- h.messageChan
-// 		if ok {
-// 			for _, client := range h.subsMap[msg.Topic]{
-// 				client.conn.Write(client.ctx, websocket.MessageText, []byte(msg.Message))
-// 			}
-// 		}
-// 	}
-// }
+func (h *Hub) spinChannel() {
+
+	for msg:= range h.messageChan {
+	
+		
+			h.lock.Lock()
+			log.Println("Aquired Lock")
+			
+			log.Println("logging form 48 topic", msg.Topic)
+			for _, client := range h.subsMap[msg.Topic]{
+
+				client.conn.Write(client.ctx, websocket.MessageText, []byte(msg.Message))
+			}
+			h.lock.Unlock()
+			log.Println("Left Lock")
+		}
+	
+
+
+	
+	
+}
 
 func (h *Hub) publish(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -102,27 +114,28 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 			newClient := Client{id: wsMessage.Cliend_id, conn: c, ctx: ctx}
 			h.clients = append(h.clients, newClient)
 			log.Println("registered " + newClient.id)
+			log.Println("registering user")
 			h.lock.Unlock()
 		case "subscribe":
-			h.lock.Lock()
 			for _, client := range h.clients {
+				h.lock.Lock()
 				if client.id == wsMessage.Cliend_id {
 					h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic], &client)
 					client.conn.Write(client.ctx, websocket.MessageText, []byte("added you to "+wsMessage.Topic))
 				}
+				h.lock.Unlock()
 
 			}
-			h.lock.Lock()
 			fmt.Println(h.subsMap[wsMessage.Topic])
 		case "unsubscribe":
-			h.lock.Lock()
 			for index, client := range h.subsMap[wsMessage.Topic] {
+				h.lock.Lock()
 				if client.id == wsMessage.Cliend_id {
 					h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic][:index], h.subsMap[wsMessage.Topic][index+1:]...)
 				}
+				h.lock.Unlock()
 
 			}
-			h.lock.Lock()
 			fmt.Println(h.subsMap[wsMessage.Topic])
 		case "disconnect":
 			defer func() {
@@ -138,11 +151,11 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 			return nil
 		case "publish":
 
-			for _, client := range h.subsMap[wsMessage.Topic] {
-				client.conn.Write(ctx, websocket.MessageText, []byte(wsMessage.Message))
+			// for _, client := range h.subsMap[wsMessage.Topic] {
+			// 	client.conn.Write(ctx, websocket.MessageText, []byte(wsMessage.Message))
 
-			}
-			// h.messageChan <- wsMessage
+			// }
+			h.messageChan <- wsMessage
 		default:
 			continue
 
@@ -157,6 +170,8 @@ func newHub() *Hub {
 		subsMap: map[string][]*Client{"info": make([]*Client, 0)},
 		chanMap: map[string]chan []byte{"info": make(chan []byte), "broadcast": make(chan []byte)},
 		clients: make([]Client, 0),
+		messageChan: make(chan socketMsg),
+
 	}
 
 	return h
