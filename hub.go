@@ -16,6 +16,7 @@ type Hub struct {
 	chanMap map[string]chan []byte
 	lock    sync.Mutex
 	clients []Client
+	messageChan chan socketMsg
 }
 
 func (h *Hub) wsHandler(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +35,29 @@ func (h *Hub) wsHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(listining_err)
 	}
 	defer c.Close(websocket.StatusInternalError, "connection closed")
+}
+
+func (h *Hub) spinChannel() {
+
+	for msg:= range h.messageChan {
+	
+		
+			h.lock.Lock()
+			log.Println("Aquired Lock")
+			
+			log.Println("logging form 48 topic", msg.Topic)
+			for _, client := range h.subsMap[msg.Topic]{
+
+				client.conn.Write(client.ctx, websocket.MessageText, []byte(msg.Message))
+			}
+			h.lock.Unlock()
+			log.Println("Left Lock")
+		}
+	
+
+
+	
+	
 }
 
 func (h *Hub) publish(w http.ResponseWriter, r *http.Request) {
@@ -86,28 +110,36 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 
 		switch wsMessage.Action {
 		case "register":
+			h.lock.Lock()
 			newClient := Client{id: wsMessage.Cliend_id, conn: c, ctx: ctx}
 			h.clients = append(h.clients, newClient)
 			log.Println("registered " + newClient.id)
+			log.Println("registering user")
+			h.lock.Unlock()
 		case "subscribe":
 			for _, client := range h.clients {
+				h.lock.Lock()
 				if client.id == wsMessage.Cliend_id {
 					h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic], &client)
 					client.conn.Write(client.ctx, websocket.MessageText, []byte("added you to "+wsMessage.Topic))
 				}
+				h.lock.Unlock()
 
 			}
 			fmt.Println(h.subsMap[wsMessage.Topic])
 		case "unsubscribe":
 			for index, client := range h.subsMap[wsMessage.Topic] {
+				h.lock.Lock()
 				if client.id == wsMessage.Cliend_id {
 					h.subsMap[wsMessage.Topic] = append(h.subsMap[wsMessage.Topic][:index], h.subsMap[wsMessage.Topic][index+1:]...)
 				}
+				h.lock.Unlock()
 
 			}
 			fmt.Println(h.subsMap[wsMessage.Topic])
 		case "disconnect":
 			defer func() {
+				
 				for _, client := range h.clients {
 					if client.id == wsMessage.Cliend_id {
 						client.conn.Close(websocket.StatusGoingAway, "fullfilled my dreams")
@@ -119,10 +151,11 @@ func (h *Hub) listenIncomingMessage(ctx context.Context, c *websocket.Conn) erro
 			return nil
 		case "publish":
 
-			for _, client := range h.subsMap[wsMessage.Topic] {
-				client.conn.Write(ctx, websocket.MessageText, []byte(wsMessage.Message))
+			// for _, client := range h.subsMap[wsMessage.Topic] {
+			// 	client.conn.Write(ctx, websocket.MessageText, []byte(wsMessage.Message))
 
-			}
+			// }
+			h.messageChan <- wsMessage
 		default:
 			continue
 
@@ -137,6 +170,8 @@ func newHub() *Hub {
 		subsMap: map[string][]*Client{"info": make([]*Client, 0)},
 		chanMap: map[string]chan []byte{"info": make(chan []byte), "broadcast": make(chan []byte)},
 		clients: make([]Client, 0),
+		messageChan: make(chan socketMsg),
+
 	}
 
 	return h
